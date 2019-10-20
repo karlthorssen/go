@@ -46,11 +46,13 @@
     (* amp
        (env-gen:kr (adsr 0 0 1 0.1 1) gate :action FREE)
        (pitch-shift
-        (play-buf 2 vocal-buffer :start-pos (* sample-rate start-pos) :action FREE)
+        (scaled-play-buf 2 vocal-buffer :start-pos (* sample-rate start-pos) :action FREE)
         :pitch-ratio ratio
         :time-dispersion 0.01))))
 
 (def sing-buffer (sample "resources/EndVocalLoop-16Bar_keyDMaj_120bpm.wav")) ;; definitely not D major
+(definst sing-buffer-inst []
+  (scaled-play-buf 2 sing-buffer :action FREE))
 (definst sing-loop [ratio (/ 1 0.95) ;; cancel pitch shift from slowing down sample
                     amp 1
                     rate 0.95 ;; convert 120 bpm to 114
@@ -61,9 +63,11 @@
     (* amp
        (env-gen:kr (adsr attack 0 1 0.1 1) gate :action FREE)
        (pitch-shift
-        (play-buf 2 sing-buffer :rate rate :start-pos (* rate sample-rate start-pos) :action FREE)
+        (scaled-play-buf 2 sing-buffer :rate rate :start-pos (* rate sample-rate start-pos) :action FREE)
         :pitch-ratio ratio
         :time-dispersion 0.01))))
+
+;; (play-gated (beats-to-time 8.0 BPM) (sing-loop :rate 0.85 :ratio (/ 1 0.85)))
 
 (def chosen-scale (comp scale/C scale/major))
 (def BPM 114)
@@ -79,7 +83,7 @@
 (defperc snare "resources/samples2/snare9.aif")
 (defperc hat "resources/samples2/hatclosed3.aif")
 (defperc hat2 "resources/samples2/hatclosed1.aif")
-(defperc hat3 "resources/samples2/hatclosed1.aif")
+(defperc hat3 "resources/samples2/rimshot12.aif")
 (defperc stick "resources/samples2/rimshot9.aif")
 (defperc tambourine "resources/samples2/tambourine.aif")
 
@@ -95,9 +99,10 @@
           :tambourine {:sound tambourine}
           :kick {:sound (fn [& {:keys [amp]}]
                           (my-inst/kick :amp amp :decay 0.3))
-                 :amp 0.7}})
+                 :amp 0.5}})
 
-(defmethod lz/play-note :sing-loop [{:keys [start duration amp] :or {amp 1}}]
+(defmethod lz/play-note :sing-loop [{:keys [start duration amp rate ratio]
+                                     :or {amp 1 rate 0.95 ratio (/ 1 0.95)}}]
   (when start
     (let [sample-beat-length 64
           duration (or duration (- sample-beat-length start))]
@@ -115,15 +120,15 @@
   (when pitch
     (plucky :freq (temperament/equal pitch) :cutoff 900 :dur (* 0.8 duration) :amp amp)))
 
-(defmethod lz/play-note :beat [{:keys [amp drum] :or {amp 1}}] ;; TODO destructure
-  (let [{sound-fn :sound default-amp :amp :or {default-amp 0.2}} (get kit drum)]
+(defmethod lz/play-note :beat [{note-amp :amp drum :drum :or {note-amp 1}}]
+  (let [{sound-fn :sound drum-amp :amp :or {drum-amp 0.04}} (get kit drum)]
     (when sound-fn
-      (sound-fn :amp (* default-amp amp)))))
+      (sound-fn :amp (* drum-amp note-amp)))))
 
 (defmethod lz/play-note :bass [{:keys [pitch duration amp] :or {amp 1}}]
   (when pitch
    (play-gated duration
-               (synth/vintage-bass :note pitch :velocity 30 :amp (* 0.5 amp)))))
+               (synth/vintage-bass :note pitch :velocity 30 :amp (* 0.35 amp)))))
 
 (defmethod lz/play-note :organ [{:keys [pitch duration]}]
   (organ :freq (temperament/equal pitch) :dur duration))
@@ -143,7 +148,7 @@
 (defmethod lz/play-note :piano [{:keys [pitch duration amp] :or {amp 1}}]
   (when pitch
     (play-gated (+ 0.2 duration)
-     (sampled-piano pitch :level (* 0.2 amp) :release 0.3))))
+     (sampled-piano pitch :level (* 0.12 amp) :release 0.3))))
 
 (defmethod lz/play-note :piano2 [{:keys [pitch duration]}]
   (when pitch
@@ -158,12 +163,12 @@
   (let [release 0.02]
    (when pitch
      (reese :freq (temperament/equal pitch)
-            :amp 0.12
+            :amp 0.08
             :dur (- duration release)))))
 
 (defmethod lz/play-note :supersaw [{:keys [pitch duration amp] :or {amp 1} :as note}]
   (when pitch
-    (supersaw (temperament/equal pitch) :amp (* amp 0.5) :dur (- duration 0.05) :release 0.1)))
+    (supersaw (temperament/equal pitch) :amp (* amp 0.65) :dur (- duration 0.05) :release 0.1)))
 
 (defmethod lz/play-note :trumpet [{:keys [pitch duration amp] :or {amp 1}}]
   (when pitch
@@ -229,13 +234,12 @@
 (def swup (partial * 1.05))
 (def swbk (partial * 0.95))
 
-(def soft-drum (let [hat-pattern [0 1 1.75 2 2.25 2.5 2.75 3 3.5]]
-                 (->> [(tap :hat (range 8) 8)
-                       (tap :tambourine [1.75 2.5 3.5 5.75 6.5 7.5] 8)
-                       (tap :hat2 [ 2.25 2.5 2.75  6.25 6.5 6.75] 8)
-                      (tap :kick (range 0 8 2) 8)]
-                     (reduce with)
-                     (all :part :beat))))
+(def soft-drum (->> [(tap :hat (range 8) 8)
+                     (tap :tambourine [1.75 2.5  3.5 5.75 6.5 7.5] 8)
+                     (tap :hat2 [6.25 6.5 6.75] 8)
+                     (tap :kick (range 0 8 2) 8)]
+                    (reduce with)
+                    (all :part :beat)))
 
 (def steady-chords (inst-phrase :piano
                                 [4 4 4 4]
@@ -278,7 +282,7 @@
                            5 4 5 5
                            6 7 6 7 7 7 7 7]))
 
-(def long-break (with
+(def chorus (with
                  (times 12 soft-drum)
                  (inst-phrase :bass
                               [4 2 1 1
@@ -296,32 +300,31 @@
                                     nil
 
                                     0 2 3 3 0 -1 0 0]))
-                 (all :amp 0.7
-                      (inst-phrase :piano
-                                   [24
-                                    eth eth 5 qtr qtr
+                 (inst-phrase :piano
+                              [24
+                               eth eth 5 qtr qtr
 
-                                    eth eth 3 hf qtr qtr
-                                    eth eth 5 qtr qtr
-                                    qtr 5 qtr qtr
-                                    qtr 5 qtr qtr
+                               eth eth 3 hf qtr qtr
+                               eth eth 5 qtr qtr
+                               qtr 5 qtr qtr
+                               qtr 5 qtr qtr
 
-                                    hf 4 qtr qtr
-                                    eth eth 5 qtr qtr
-                                    qtr 7
-                                    eth eth 5 eth eth qtr]
-                                   [nil
-                                    (chords :v-maj7) (chords :v-maj7) nil 6 4
+                               hf 4 qtr qtr
+                               eth eth 5 qtr qtr
+                               qtr 7
+                               eth eth 5 eth eth qtr]
+                              [nil
+                               (chords :v-maj7) (chords :v-maj7) nil 6 4
 
-                                    (chords :iv) (chords :iv) nil 3 4 5
-                                    (chords :i)  (chords :i) nil 6 4
-                                    5 nil 5 4
-                                    3 nil 2 1
+                               (chords :iv) (chords :iv) nil 3 4 5
+                               (chords :i)  (chords :i) nil 6 4
+                               5 nil 5 4
+                               3 nil 2 1
 
-                                    0 nil (chords :i7) (chords :i7)
-                                    (chords :i7) (chords :i7) nil -2 -1
-                                    (chords :i) nil
-                                    (chords :i) (chords :i) nil 0 1 0]))
+                               0 nil (chords :i7) (chords :i7)
+                               (chords :i7) (chords :i7) nil -2 -1
+                               (chords :i) nil
+                               (chords :i) (chords :i) nil 0 1 0])
                  (inst-phrase :supersaw
                               [6 1 1
                                8
@@ -346,7 +349,17 @@
                                            :i :v
                                            :i]))))
 
-(def chorus-inst (->> min-drum
+
+(def min-drum (let [hat-pattern [0 1 1.75 2 2.25 2.5 2.75 3 3.5]]
+                (->> [(tap :hat (range 8) 8)
+                      (tap :tambourine (range 1 8 2) 8)
+                      (tap :kick (range 0 8 2) 8)]
+                     (reduce with)
+                     (times 2)
+                     (with (tap :hat [15.25 15.5 15.75] 8))
+                     (all :part :beat))))
+
+(def break-inst (->> min-drum
                       (with (inst-phrase :piano
                                          [4 4 4 4]
                                          (map chords [:ii :ii :vi :vi]))
@@ -355,39 +368,30 @@
                                          (map (partial + -14) [1 3 5 7 7 5])))
                       (times 2)))
 
-(def sing-chorus (with chorus-inst [{:part :sing-loop :time 0 :start 0 :duration 32 :amp 1}]))
-(def second-chorus (with chorus-inst [{:part :sing-loop :time 0 :start 32 :duration 32 :amp 1}]))
+(def sing-break (with (times 3 break-inst) [{:part :sing-loop :time 0 :start 0 :duration 64 :amp 1}
+                                            {:part :sing-loop :time 64 :start 0 :duration 32 :amp 1}]))
 
 (defn play! [notes]
   (->> notes (tempo (bpm BPM)) lz/play))
 
 (def track (atom nil))
 (do
-  (def min-drum (let [hat-pattern [0 1 1.75 2 2.25 2.5 2.75 3 3.5]]
-                (->> [(tap :hat (range 8) 8)
-                      (tap :tambourine (range 1 8 2) 8)
-                      (tap :kick (range 0 8 2) 8)]
-                     (reduce with)
-                     (times 2)
-                     (with (tap :hat [15.25 15.5 15.75] 8))
-                     (all :part :beat))))
+
   (reset! track
           (->>
-           #_(then
-            (with
-             steady-chords
-             [{:part :reverse-vocal :start 1 :duration 8 :time 4}]
-             (times 2 soft-drum)
-             (inst-phrase :piano
-                          (concat (repeat 8 qtr) [eth eth qtr qtr qtr] [qtr 3])
-                          [1 2 2 2 1 2 2 2 1 1 1 1 1 0 -1])))
-           #_(then
+           (with
+            steady-chords
+            (times 2 soft-drum)
+            (inst-phrase :piano
+                         (concat (repeat 8 qtr) [eth eth qtr qtr qtr] [qtr 3])
+                         [1 2 2 2 1 2 2 2 1 1 1 1 1 0 -1]))
+           (then
             (->> steady-chords
                  (with
                   (times 2 soft-drum)
                   [{:part :reverse-vocal :start 1 :duration 8 :time 4}]
                   melody3)))
-           #_(then
+           (then
             (with
              steady-chords
              steady-bass
@@ -396,24 +400,45 @@
            (then
             (with
              steady-chords
-             (times 2 soft-drum) ;; TODO fix this drum
+             (times 2 soft-drum)
              melody4))
-           (then sing-chorus)
-           ;; End first chorus
-           (then long-break)
+           (then chorus)
 
-           (then second-chorus)
+           (then
+            (with
+             steady-chords
+             steady-bass
+             (times 2 soft-drum)
+             melody2))
+           (then
+            (->> steady-chords
+                 (with
+                  (times 2 soft-drum)
+                  [{:part :reverse-vocal :start 1 :duration 8 :time 4}]
+                  melody3)))
+           (then
+            (with
+             steady-chords
+             steady-bass
+             (times 2 soft-drum)
+             melody2))
+           (then
+            (with
+             steady-chords
+             (times 2 soft-drum)
+             melody4))
+           (then chorus)
 
-
+           (then sing-break)
+           (then chorus)
 
            (tempo (bpm BPM))))
   ;; (lz/play @track)
-  (time @(lz/play @track))
+  ;; (time @(lz/play @track))
   nil
   )
 
-(play!
- )
+(lz/stop)
 
 (comment
   ;; i	ii	iii	iv	v	vi	vii
@@ -433,11 +458,10 @@
   (supersaw :dur 4)
 
 
-  (piano/piano 16)
+  (piano/piano 60)
 
-  (do (recording-start "/Users/jonathan/src/music/go/voxhi.wav")
-      (vocal :ratio 5/8)
-      (Thread/sleep 4000)
+  (do (recording-start "~/src/music/go/LifeAndBeyond.wav")
+      @(lz/play @track)
       (recording-stop))
 
   (let [b (piano/piano 60 :dur 10)]
@@ -454,3 +478,4 @@
   (play-gated 1 (sampled-piano 60))
   (play-gated 1 (sampled-trumpet 60 :start-pos 0.25 :attack 0.01 :level 1.3))
 )
+(println ":::::::::::::::::::::::::::::: loaded :::::::::::::::::::::::::::::")

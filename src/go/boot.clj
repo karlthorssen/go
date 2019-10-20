@@ -2,8 +2,6 @@
   (:require [overtone.core :refer :all :exclude [tap]]))
 
 (comment
-  osample/reload-all-samples
-
   (server-status)
   (kill-server)
   (boot-internal-server)
@@ -13,6 +11,9 @@
 
 
 
+  (require '[overtone.sc.machinery.server.connection :as connection])
+  @connection/connection-status*
+  (connection/shutdown-server)
   )
 
 (reset! overtone.samples.freesound/*access-token* "AQ160WVqkwjkAEbkPRU3Mwe4p0bhZE")
